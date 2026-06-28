@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aviation Map - Draw Manager</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <style>
+        * { box-sizing: border-box; }
+        html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, sans-serif; }
+        #map { height: 100%; width: 100%; background: #d4e6f1; }
+        
+        .fix-label {
+            background: transparent; border: none; box-shadow: none;
+            font-size: 11px; font-weight: bold; color: #222;
+            text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff;
+            white-space: nowrap; pointer-events: none;
+        }
+
+        #control-box {
+            position: absolute; top: 12px; right: 12px; z-index: 2000;
+            display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
+        }
+        #menu-btn {
+            background: #fff; border: 1px solid #aaa; padding: 7px 14px; border-radius: 5px;
+            cursor: pointer; font-weight: bold; box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+            transition: background 0.2s;
+        }
+        #menu-btn:hover { background: #f0f0f0; }
+        
+        #panel {
+            background: #fff; width: 340px; max-height: 87vh; border-radius: 6px;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.35); display: flex; flex-direction: column;
+            font-size: 13px; overflow: hidden;
+        }
+        #panel.hide { display: none; }
+
+        .tabs { display: flex; background: #f7f7f7; border-bottom: 2px solid #ddd; }
+        .tab { flex: 1; padding: 11px; text-align: center; cursor: pointer; font-weight: 600; 
+               border-bottom: 3px solid transparent; transition: all 0.2s; }
+        .tab:hover { background: #e8e8e8; }
+        .tab.on { color: #007bff; border-bottom-color: #007bff; background: #fff; }
+        
+        .content { padding: 12px; overflow-y: auto; flex: 1; }
+        .pane { display: none; }
+        .pane.on { display: block; }
+
+        .g-head { 
+            background: #f3f3f3; padding: 9px; margin-top: 6px; cursor: pointer; 
+            font-weight: bold; border-radius: 4px; display: flex; justify-content: space-between; 
+            transition: background 0.2s;
+        }
+        .g-head:hover { background: #e5e5e5; }
+        .g-body { display: none; padding-left: 12px; margin-bottom: 6px; }
+        .g-body.show { display: block; }
+        
+        .row { display: flex; align-items: center; margin: 3px 0; }
+        .row input[type="checkbox"] { margin-right: 7px; cursor: pointer; }
+        .row label { cursor: pointer; font-size: 12px; }
+
+        .inp-coord { width: 150px; font-family: 'Courier New', monospace; padding: 4px; border: 1px solid #bbb; border-radius: 3px; }
+        .btn { padding: 5px 10px; cursor: pointer; border-radius: 4px; border: 1px solid #ccc; 
+               background: #f9f9f9; font-size: 12px; transition: background 0.2s; }
+        .btn:hover { background: #e8e8e8; }
+        .btn-blue { background: #007bff; color: white; border: none; font-weight: bold; }
+        .btn-blue:hover { background: #0056b3; }
+        .btn-red { background: #dc3545; color: white; border: none; font-weight: bold; }
+        .btn-red:hover { background: #a71d2a; }
+
+        /* 그려진 항목 리스트 스타일 */
+        #drawn-list-container { margin-top: 15px; border-top: 1px solid #ddd; padding-top: 10px; }
+        .drawn-item { 
+            display: flex; justify-content: space-between; align-items: center; 
+            background: #f8f9fa; border: 1px solid #eee; padding: 6px; margin-bottom: 4px; border-radius: 4px; 
+        }
+        .drawn-info { font-size: 11px; color: #333; }
+        .btn-del { 
+            color: #dc3545; cursor: pointer; font-weight: bold; font-size: 14px; 
+            padding: 0 5px; margin-left: 5px;
+        }
+        .btn-del:hover { color: #a71d2a; }
+
+    </style>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="js/data.js"></script>
+    <script src="js/airspace_final.js"></script>
+</head>
+<body>
+
+<div id="control-box">
+    <button id="menu-btn" onclick="toggleMenu()">☰ Menu</button>
+    <div id="panel">
+        <div class="tabs">
+            <div class="tab on" onclick="switchPane('route')">항로</div>
+            <div class="tab" onclick="switchPane('airspace')">공역</div>
+            <div class="tab" onclick="switchPane('draw')">그리기</div>
+        </div>
+
+        <div class="content">
+            <!-- 항로 탭 -->
+            <div id="pane-route" class="pane on">
+                <div class="row">
+                    <input type="checkbox" id="cb-fix" checked> 
+                    <label for="cb-fix"><strong>FIX Points</strong></label>
+                </div>
+                <hr style="margin:8px 0; border:none; border-top:1px solid #ddd;">
+                <div style="margin-bottom:6px;">
+                    <strong>Routes</strong> 
+                    <button class="btn" style="margin-left:8px" onclick="toggleRoutes(true)">All On</button>
+                    <button class="btn" onclick="toggleRoutes(false)">Off</button>
+                </div>
+                <div id="list-route"></div>
+            </div>
+
+            <!-- 공역 탭 -->
+            <div id="pane-airspace" class="pane">
+                <div style="margin-bottom:6px;">
+                    <strong>Airspace</strong>
+                    <button class="btn" style="margin-left:8px" onclick="toggleAirspaces(true)">All On</button>
+                    <button class="btn" onclick="toggleAirspaces(false)">Off</button>
+                </div>
+                <div id="list-airspace"></div>
+            </div>
+
+            <!-- 그리기 탭 -->
+            <div id="pane-draw" class="pane">
+                <div style="margin-bottom:10px;">
+                    <label><input type="radio" name="draw-mode" value="CIRCLE" checked onchange="updateDrawUI()"> CIRCLE</label>
+                    <label style="margin-left:12px"><input type="radio" name="draw-mode" value="POLYGON" onchange="updateDrawUI()"> POLYGON</label>
+                </div>
+                <div id="opt-r" style="margin-bottom:8px;">
+                    Radius: <input type="number" id="inp-r" value="5" style="width:45px"> NM
+                </div>
+                
+                <strong style="color:#555">좌표 입력</strong>
+                <ul id="coord-list" style="list-style:none; padding:0; margin:8px 0;"></ul>
+                
+                <div style="display:flex; gap:8px; margin-top:10px;">
+                    <button class="btn btn-blue" style="flex:1" onclick="execAdd()">추가 (Add)</button>
+                    <button class="btn btn-red" style="width:80px" onclick="clearAllDrawn()">전체삭제</button>
+                </div>
+
+                <!-- 그려진 항목 리스트 -->
+                <div id="drawn-list-container">
+                    <strong style="color:#555">그려진 항목</strong>
+                    <div id="drawn-list" style="margin-top:5px;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="map"></div>
+
+<script>
+    var map, layerFix, layerLabel, layerDraw;
+    var store = { route: {}, airspace: {} };
+    var drawnItems = []; // 그려진 객체 저장 배열 { id, layer, desc }
+
+    document.addEventListener("DOMContentLoaded", init);
+
+    function init() {
+        map = L.map('map', { preferCanvas: true }).setView([36.5, 127.5], 7);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        layerFix = L.layerGroup().addTo(map);
+        layerLabel = L.layerGroup();
+        layerDraw = L.layerGroup().addTo(map);
+
+        map.on('zoomend', () => {
+            if(document.getElementById('cb-fix').checked && map.getZoom() >= 9) map.addLayer(layerLabel);
+            else map.removeLayer(layerLabel);
+        });
+
+        document.getElementById('cb-fix').addEventListener('change', function() {
+            if(this.checked) {
+                map.addLayer(layerFix);
+                if(map.getZoom() >= 9) map.addLayer(layerLabel);
+            } else {
+                map.removeLayer(layerFix);
+                map.removeLayer(layerLabel);
+            }
+        });
+
+        loadFixData();
+        loadRouteData();
+        loadAirspaceData();
+        updateDrawUI();
+    }
+
+    // --- 데이터 로드 함수들 ---
+    function loadFixData() {
+        if(typeof fixData === 'undefined') return;
+        Object.keys(fixData).forEach(k => {
+            var d = fixData[k];
+            L.marker([d.lat, d.lon], { 
+                icon: L.divIcon({ className: '', html: '<div style="width:6px;height:6px;background:#000;border-radius:50%"></div>', iconSize: [6,6] })
+            }).addTo(layerFix);
+            
+            L.marker([d.lat, d.lon], { 
+                icon: L.divIcon({ className: 'fix-label', html: k, iconSize: [50,14], iconAnchor: [25,-6] }), 
+                interactive: false 
+            }).addTo(layerLabel);
+        });
+    }
+
+    function loadRouteData() {
+        if(typeof routeData === 'undefined') return;
+        var el = document.getElementById('list-route');
+        routeData.forEach(r => {
+            var pts = [];
+            r.segments.forEach(s => {
+                if(fixData[s.from] && fixData[s.to]) {
+                    pts.push([fixData[s.from].lat, fixData[s.from].lon]);
+                    pts.push([fixData[s.to].lat, fixData[s.to].lon]);
+                }
+            });
+            if(pts.length > 0) {
+                var line = L.polyline(pts, { color: '#1e90ff', weight: 2, opacity: 0.7 }).addTo(map);
+                store.route[r.name] = line;
+                var row = document.createElement('div');
+                row.className = 'row';
+                row.innerHTML = `<input type="checkbox" checked onchange="toggleItem('route','${r.name}',this.checked)"> <label>${r.name}</label>`;
+                el.appendChild(row);
+            }
+        });
+    }
+
+    function loadAirspaceData() {
+        if(typeof airspaceData === 'undefined') return;
+        var el = document.getElementById('list-airspace');
+        var groups = {};
+        airspaceData.forEach(a => {
+            var t = a.type || 'OTHER';
+            if(!groups[t]) groups[t] = [];
+            groups[t].push(a);
+        });
+
+        Object.keys(groups).sort().forEach(type => {
+            var head = document.createElement('div');
+            head.className = 'g-head';
+            head.innerHTML = `<span>${type} (${groups[type].length})</span> <span>▼</span>`;
+            head.onclick = function() { this.nextElementSibling.classList.toggle('show'); };
+
+            var body = document.createElement('div');
+            body.className = 'g-body';
+            var safeType = type.replace(/[^a-zA-Z0-9]/g, '');
+            body.innerHTML = `<div style="margin:6px 0; font-size:11px;">
+                <span style="color:#007bff;cursor:pointer" onclick="toggleGroupType('${safeType}',true)">All On</span> | 
+                <span style="color:#007bff;cursor:pointer" onclick="toggleGroupType('${safeType}',false)">Off</span>
+            </div>`;
+
+            groups[type].forEach(a => {
+                var col = getAirspaceColor(type);
+                var lg = store.airspace[a.name] || L.layerGroup().addTo(map);
+                store.airspace[a.name] = lg;
+                
+                // UI 생성 (중복 방지)
+                if(lg.getLayers().length === 0) {
+                     var row = document.createElement('div');
+                    row.className = 'row';
+                    row.innerHTML = `<input type="checkbox" class="cb-${safeType}" checked onchange="toggleItem('airspace','${a.name}',this.checked)"> <label>${a.name}</label>`;
+                    body.appendChild(row);
+                }
+
+                a.shapes.forEach(s => {
+                    var opt = { color: col, weight: 2, fillColor: col, fillOpacity: 0.2 };
+                    if(s.type === 'polygon') L.polygon(s.coordinates, opt).addTo(lg);
+                    else if(s.type === 'circle') L.circle(s.center, { ...opt, radius: s.radius }).addTo(lg);
+                });
+            });
+            el.appendChild(head);
+            el.appendChild(body);
+        });
+    }
+
+    function getAirspaceColor(t) {
+        t = t.toUpperCase();
+        if(t.includes('MOA')) return '#FFD700';
+        if(t.includes('CTR') || t.includes('ATZ')) return '#9370DB';
+        if(t.includes('RESTRICTED')) return '#32CD32';
+        if(t.includes('PROHIBITED')) return '#FF0000';
+        if(t.includes('CATA')) return '#000080';
+        if(t.includes('ALERT')) return '#CD853F';
+        if(t.includes('TMA') || t.includes('CTA')) return '#4682B4';
+        if(t.includes('DANGER')) return '#FF4500';
+        return '#2E8B57';
+    }
+
+    function toggleItem(cat, name, show) {
+        var layer = store[cat][name];
+        if(!layer) return;
+        show ? map.addLayer(layer) : map.removeLayer(layer);
+    }
+    function toggleRoutes(show) {
+        document.querySelectorAll('#list-route input').forEach(cb => { cb.checked = show; toggleItem('route', cb.nextElementSibling.innerText, show); });
+    }
+    function toggleAirspaces(show) {
+        document.querySelectorAll('#list-airspace input').forEach(cb => { cb.checked = show; toggleItem('airspace', cb.nextElementSibling.innerText, show); });
+    }
+    function toggleGroupType(safeType, show) {
+        document.querySelectorAll('.cb-' + safeType).forEach(cb => { cb.checked = show; toggleItem('airspace', cb.nextElementSibling.innerText, show); });
+    }
+    function switchPane(id) {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
+        document.querySelectorAll('.pane').forEach(p => p.classList.remove('on'));
+        event.currentTarget.classList.add('on');
+        document.getElementById('pane-' + id).classList.add('on');
+    }
+    function toggleMenu() { document.getElementById('panel').classList.toggle('hide'); }
+
+    // --- 그리기 및 목록 관리 ---
+    function updateDrawUI() {
+        var mode = document.querySelector('input[name="draw-mode"]:checked').value;
+        document.getElementById('opt-r').style.display = (mode === 'CIRCLE') ? 'block' : 'none';
+        var list = document.getElementById('coord-list');
+        list.innerHTML = '';
+        addCoordRow();
+        if(mode === 'POLYGON') { addCoordRow(); addCoordRow(); }
+    }
+
+    function addCoordRow() {
+        var li = document.createElement('li');
+        li.style.marginBottom = '4px';
+        li.innerHTML = `<input type="text" class="inp-coord" placeholder="370000N1260000E" onkeyup="autoFmt(this)"> <button class="btn" onclick="addCoordRow()">+</button> <button class="btn" onclick="this.parentNode.remove()">×</button>`;
+        document.getElementById('coord-list').appendChild(li);
+    }
+
+    function autoFmt(inp) {
+        var v = inp.value.replace(/\s/g,'').toUpperCase();
+        if(v.length === 6 && !isNaN(v)) inp.value = v + 'N';
+    }
+
+    // 그리기 추가 (기존 것 유지)
+    function execAdd() {
+        var mode = document.querySelector('input[name="draw-mode"]:checked').value;
+        var inputs = document.querySelectorAll('.inp-coord');
+        var pts = [];
+        
+        inputs.forEach(inp => {
+            var val = inp.value.trim().toUpperCase();
+            if(!val) return;
+            try {
+                var parts = val.split('N');
+                if(parts.length < 2) return;
+                var lat = convertDMS(parts[0]);
+                var lon = convertDMS(parts[1].replace('E',''));
+                pts.push([lat, lon]);
+            } catch(e) {}
+        });
+
+        if(pts.length === 0) return alert('좌표를 입력하세요.');
+
+        var newLayer;
+        var desc = "";
+        
+        if(mode === 'CIRCLE') {
+            var rVal = document.getElementById('inp-r').value || 5;
+            var r = parseFloat(rVal) * 1852;
+            desc = `Circle (R: ${rVal}NM)`;
+            
+            // 그룹으로 묶어서 (원 + 중심점)
+            newLayer = L.layerGroup();
+            pts.forEach(p => {
+                L.circle(p, { color: 'red', fillColor: '#f03', fillOpacity: 0.3, radius: r }).addTo(newLayer);
+                L.marker(p).addTo(newLayer);
+            });
+        } else {
+            if(pts.length < 3) return alert('폴리곤은 최소 3개 좌표 필요');
+            desc = `Polygon (${pts.length} pts)`;
+            
+            newLayer = L.layerGroup();
+            L.polygon(pts, { color: 'red', fillColor: '#f03', fillOpacity: 0.3 }).addTo(newLayer);
+            pts.forEach(p => L.circleMarker(p, { radius: 3, color: 'red' }).addTo(newLayer));
+        }
+
+        // 레이어 지도에 추가
+        layerDraw.addLayer(newLayer);
+
+        // 목록 데이터에 추가
+        var id = Date.now(); // 고유 ID
+        drawnItems.push({ id: id, layer: newLayer, desc: desc });
+
+        // 목록 UI 갱신
+        renderDrawnList();
+
+        // 입력창 초기화 (선택사항 - 연속 입력을 위해 유지하거나 초기화)
+        // updateDrawUI(); // 초기화하려면 주석 해제
+    }
+
+    function renderDrawnList() {
+        var container = document.getElementById('drawn-list');
+        container.innerHTML = "";
+        
+        if(drawnItems.length === 0) {
+            container.innerHTML = "<div style='color:#999;font-size:11px;padding:5px;'>항목 없음</div>";
+            return;
+        }
+
+        drawnItems.forEach(item => {
+            var div = document.createElement('div');
+            div.className = 'drawn-item';
+            div.innerHTML = `
+                <span class="drawn-info">${item.desc}</span>
+                <span class="btn-del" onclick="removeDrawnItem(${item.id})">×</span>
+            `;
+            container.appendChild(div);
+        });
+    }
+
+    function removeDrawnItem(id) {
+        var idx = drawnItems.findIndex(x => x.id === id);
+        if(idx > -1) {
+            var item = drawnItems[idx];
+            layerDraw.removeLayer(item.layer); // 지도에서 삭제
+            drawnItems.splice(idx, 1); // 배열에서 삭제
+            renderDrawnList(); // 목록 갱신
+        }
+    }
+
+    function clearAllDrawn() {
+        layerDraw.clearLayers();
+        drawnItems = [];
+        renderDrawnList();
+    }
+
+    function convertDMS(s) {
+        s = s.trim();
+        if(s.length < 4) return parseFloat(s);
+        var sec = parseFloat(s.slice(-2));
+        var min = parseFloat(s.slice(-4, -2));
+        var deg = parseFloat(s.slice(0, -4));
+        return deg + min/60 + sec/3600;
+    }
+</script>
+</body>
+</html>
